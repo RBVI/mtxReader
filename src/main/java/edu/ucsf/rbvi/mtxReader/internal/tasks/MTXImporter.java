@@ -86,6 +86,7 @@ public class MTXImporter {
 			matrix.readMTX(taskMonitor, mtxInputName);
 		} catch (Exception e) {
 			taskMonitor.showMessage(TaskMonitor.Level.ERROR, "Unable to read matrix market file from "+mtxInputName+": "+e.getMessage());
+			e.printStackTrace();
 			return null;
 		}
 

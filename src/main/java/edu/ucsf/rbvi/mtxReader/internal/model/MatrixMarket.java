@@ -10,7 +10,9 @@ import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.cytoscape.model.CyRow;
 import org.cytoscape.model.CyTable;
@@ -23,6 +25,7 @@ public class MatrixMarket {
 	public static String HEADER = "%%MatrixMarket";
 	public static String COMMENT = "%";
 	public static String delimiter = null;
+	public static int LABEL_INDEX = 1;
 
 	public static enum MTXOBJECT {
 		MATRIX("matrix"),
@@ -116,20 +119,30 @@ public class MatrixMarket {
 	MTXFORMAT format;
 	MTXTYPE type;
 	MTXSYMMETRY sym;
-	boolean transposed = false;
 
-	List<String> comments;
+	private List<String> comments;
+	private Map<String, Integer> rowMap;
+	private Map<String, Integer> colMap;
 
-	int nRows;
-	int nCols;
-	int nonZeros;
+	private boolean transposed = false;
 
-	List<String[]> rowLabels;
-	List<String[]> colLabels;
+	private int nRows;
+	private int nCols;
+	private int nonZeros;
+
+	private List<String[]> rowTable;
+	private List<String[]> colTable;
+
+	private List<String> rowLabels;
+	private List<String> colLabels;
+
+	private String name;
 
 	// We only support real and integer at this point
-	int[][] intMatrix;
-	double[][] doubleMatrix;
+	private int[][] intMatrix;
+	private double[][] doubleMatrix;
+
+	private int[] colIndex;
 
 	private final CyServiceRegistrar registrar;
 	private final CyTableFactory tableFactory;
@@ -140,12 +153,16 @@ public class MatrixMarket {
 	}
 
 	public MatrixMarket(final CyServiceRegistrar registrar, 
-	                    List<String[]> rowLabels, List<String[]> colLabels) {
+	                    List<String[]> rowTable, List<String[]> colTable) {
 		this.registrar = registrar;
-		this.rowLabels = rowLabels;
-		this.colLabels = colLabels;
+		this.rowTable = rowTable;
+		this.colTable = colTable;
 		this.tableFactory = registrar.getService(CyTableFactory.class);
 		this.tableManager = registrar.getService(CyTableManager.class);
+		rowMap = new HashMap<>();
+		colMap = new HashMap<>();
+		this.rowLabels = getLabels(rowTable);
+		this.colLabels = getLabels(colTable);
 	}
 
 	public MTXFORMAT getFormat() {
@@ -164,15 +181,17 @@ public class MatrixMarket {
 		return sym;
 	}
 
+	public String toString() { return name; }
+
 	public int getNCols() { return transposed ? nRows : nCols; }
 	public int getNRows() { return transposed ? nCols : nRows; }
 	public int getNonZeroCount() { return nonZeros; }
 	public boolean isTransposed() { return transposed; }
 	public void setTranspose(boolean t) { transposed = t; }
-	public List<String[]> getRowLabels() { return rowLabels; }
-	public void setRowLabels(List<String[]> rLabels) { rowLabels = rLabels; }
-	public List<String[]> getColLabels() { return colLabels; }
-	public void setColLabels(List<String[]> cLabels) { colLabels = cLabels; }
+	public List<String> getRowLabels() { return rowLabels; }
+	public void setRowLabels(List<String> rLabels) { rowLabels = rLabels; }
+	public List<String> getColLabels() { return colLabels; }
+	public void setColLabels(List<String> cLabels) { colLabels = cLabels; }
 
 	public void readMTX(TaskMonitor taskMonitor, File mmInputName) throws FileNotFoundException, IOException {
 		FileInputStream inputStream = new FileInputStream(mmInputName);
@@ -180,6 +199,8 @@ public class MatrixMarket {
 	}
 
 	public void readMTX(TaskMonitor taskMonitor, InputStream stream, String mmInputName) throws FileNotFoundException, IOException {
+		this.name = mmInputName;
+
 		BufferedReader reader = new BufferedReader(new InputStreamReader(stream));
 		// Read the first line
 		String header = reader.readLine();
@@ -199,6 +220,8 @@ public class MatrixMarket {
 		String[] dims = line.split("\\s+");
 		nRows = Integer.parseInt(dims[0]);
 		nCols = Integer.parseInt(dims[1]);
+		// System.out.println("nRows = "+nRows);
+		// System.out.println("nCols = "+nCols);
 		if (format == MTXFORMAT.ARRAY) {
 			if (type == MTXTYPE.REAL) {
 				doubleMatrix = new double[nRows][nCols];
@@ -213,6 +236,9 @@ public class MatrixMarket {
 			}
 		} else if (format == MTXFORMAT.COORDINATE) {
 			nonZeros = Integer.parseInt(dims[2]);
+			// System.out.println("nonZeros = "+nonZeros);
+			colIndex = new int[nCols+1];
+			Arrays.fill(colIndex, -1);
 			if (type == MTXTYPE.INTEGER) {
 				intMatrix = new int[nonZeros][3];
 			} else if (type == MTXTYPE.REAL) {
@@ -234,19 +260,21 @@ public class MatrixMarket {
 		if (transposed) {
 			table = tableFactory.createTable(name, "Cells", String.class, true, false);
 			createColumns(table, rowLabels);
+			// System.out.println("Created "+rowLabels.size()+" columns");
 			createRows(table, colLabels, rowLabels);
+			// System.out.println("Created "+colLabels.size()+" rows");
 		} else {
 			table = tableFactory.createTable(name, "Genes", String.class, true, false);
 			createColumns(table, colLabels);
-			System.out.println("Created columns");
+			// System.out.println("Created columns");
 			createRows(table, rowLabels, colLabels);
-			System.out.println("Created rows");
+			// System.out.println("Created rows");
 		}
 
 		if (addTable) {
-			System.out.println("Adding table to table manager");
+			// System.out.println("Adding table to table manager");
 			tableManager.addTable(table);
-			System.out.println("...done...");
+			// System.out.println("...done...");
 		}
 		return table;
 	}
@@ -288,6 +316,46 @@ public class MatrixMarket {
 		return null;
 	}
 
+	public int getIntegerValue(int row, int col) {
+		if (transposed) { int rtmp = row; row = col; col = rtmp; }
+		if (format == MTXFORMAT.ARRAY) {
+			if (type == MTXTYPE.REAL)
+				return (int)Math.round(doubleMatrix[row][col]);
+			else if (type == MTXTYPE.INTEGER)
+				return intMatrix[row][col];
+		} else {
+			// MTXFORMAT.COORDINATE
+			int index = findIndex(row, col);
+			if (index >= 0) {
+				if (type == MTXTYPE.REAL)
+					return (int)Math.round(doubleMatrix[index][0]);
+				else if (type == MTXTYPE.INTEGER)
+					return intMatrix[index][2];
+			}
+		}
+		return Integer.MIN_VALUE;
+	}
+
+	public double getDoubleValue(int row, int col) {
+		if (transposed) { int rtmp = row; row = col; col = rtmp; }
+		if (format == MTXFORMAT.ARRAY) {
+			if (type == MTXTYPE.REAL)
+				return doubleMatrix[row][col];
+			else if (type == MTXTYPE.INTEGER)
+				return (double)intMatrix[row][col];
+		} else {
+			// MTXFORMAT.COORDINATE
+			int index = findIndex(row, col);
+			if (index >= 0) {
+				if (type == MTXTYPE.REAL)
+					return doubleMatrix[index][0];
+				else if (type == MTXTYPE.INTEGER)
+					return (double)intMatrix[index][2];
+			}
+		}
+		return Double.NaN;
+	}
+
 	public double[][] getDoubleMatrix(double missing) {
 		if (format == MTXFORMAT.ARRAY) {
 			if (type == MTXTYPE.REAL)
@@ -323,6 +391,17 @@ public class MatrixMarket {
 			return newArray;
 		}
 		return null;
+	}
+
+	public double getValue(String rowLabel, String colLabel) {
+		int row = rowLabels.indexOf(rowLabel);
+		int col = colLabels.indexOf(colLabel);
+		if (transposed) {
+			int tmp = row; row = col; col = tmp;
+		}
+		double v = getDoubleValue(row+1, col+1);
+		// System.out.println("Value for "+rowLabel+":"+row+","+colLabel+":"+col+" = "+v);
+		return v;
 	}
 
 	private void parseHeader(String header) throws IOException {
@@ -376,6 +455,11 @@ public class MatrixMarket {
 		String[] vals = line.split("\\s+");
 		intMatrix[index][0] = Integer.parseInt(vals[0]);
 		intMatrix[index][1] = Integer.parseInt(vals[1]);
+		// System.out.println("row="+intMatrix[index][0]+", col="+intMatrix[index][1]);
+		if (colIndex[intMatrix[index][1]] < 0) {
+			colIndex[intMatrix[index][1]] = index;
+			// System.out.println("colIndex["+intMatrix[index][1]+"]="+index);
+		}
 		if (type == MTXTYPE.INTEGER) {
 			intMatrix[index][2] = Integer.parseInt(vals[2]);
 		} else if (type == MTXTYPE.REAL) {
@@ -383,22 +467,22 @@ public class MatrixMarket {
 		}
 	}
 
-	private void createColumns(CyTable table, List<String[]> labels) {
-		for (String[] lbl: labels) {
-			String columnLabel = "MTX::"+lbl[1];
+	private void createColumns(CyTable table, List<String> labels) {
+		for (String lbl: labels) {
+			String columnLabel = "MTX::"+lbl;
 			table.createColumn(columnLabel, Double.class, true);
 		}
 	}
 
-	private void createRows(CyTable table, List<String[]> rowLabels, List<String[]> colLabels) {
+	private void createRows(CyTable table, List<String> rowLabels, List<String> colLabels) {
 		if (format == MTXFORMAT.COORDINATE) {
 			for (int index = 0; index < nonZeros; index++) {
 				int row = intMatrix[index][0];
 				int col = intMatrix[index][1];
 				if (transposed) { int rtmp = row; row = col; col = rtmp; }
-				String rowLabel = rowLabels.get(row-1)[1];
+				String rowLabel = rowLabels.get(row-1);
 				CyRow cyRow = table.getRow(rowLabel);
-				String colLabel = "MTX::"+colLabels.get(col-1)[1];
+				String colLabel = "MTX::"+colLabels.get(col-1);
 				if (type == MTXTYPE.REAL) {
 					double v = doubleMatrix[index][0];
 					cyRow.set(colLabel, Double.valueOf(v));
@@ -409,10 +493,10 @@ public class MatrixMarket {
 			}
 		} else if (format == MTXFORMAT.ARRAY) {
 			for (int row = 0; row < rowLabels.size(); row++) {
-				String rowLabel = rowLabels.get(row)[1];
+				String rowLabel = rowLabels.get(row);
 				CyRow cyRow = table.getRow(rowLabel);
 				for (int col = 0; col < colLabels.size(); col++) {
-					String colLabel = "MTX::"+colLabels.get(col)[1];
+					String colLabel = "MTX::"+colLabels.get(col);
 					int r = row+1;
 					int c = col+1;
 					if (transposed) { int rtmp = r; r = c; c = rtmp; }
@@ -424,5 +508,46 @@ public class MatrixMarket {
 				}
 			}
 		}
+	}
+
+	private int findIndex(int row, int col) {
+		// System.out.println("findIndex("+row+","+col+")");
+		int index1 = colIndex[col];
+		// System.out.println("index1="+index1);
+		if (index1 < 0) return Integer.MIN_VALUE;
+		int index2 = colIndex[++col];
+
+		int indexMid = index1+(index2-index1)/2;
+		int index = -1;
+		while (index < 0) {
+			index = compare(index1, index2, indexMid, row);
+			if (index == -2) {
+				index2 = indexMid;
+				indexMid = index1+(index2-index1)/2;
+			} else if (index == -1) {
+				index1 = indexMid;
+				indexMid = index1+(index2-index1)/2;
+			}
+		}
+		return index;
+	}
+
+	private int compare(int index1, int index2, int indexMid, int row) {
+		// System.out.println("index1="+index1+", index2="+index2+", indexMid="+indexMid+", row = "+row);
+		if (intMatrix[index1][0] < row && intMatrix[indexMid][0] > row)
+			return -2;
+		if (intMatrix[indexMid][0] < row && intMatrix[index2][0] > row)
+			return -1;
+		if (intMatrix[index1][0] == row) return index1;
+		if (intMatrix[indexMid][0] == row) return indexMid;
+		return index2;
+	}
+
+	private List<String> getLabels(List<String[]> labelTable) {
+		List<String> labels = new ArrayList<>(labelTable.size());
+		for (String[] row: labelTable) {
+			labels.add(row[LABEL_INDEX]);
+		}
+		return labels;
 	}
 }

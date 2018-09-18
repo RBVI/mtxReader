@@ -58,7 +58,7 @@ public class MTXImporterTask extends AbstractTask {
 		// Read our network from the MTX file
 		MatrixMarket matrix = importer.readMTX(taskMonitor, mtxFile, rowFile, colFile);
 
-		CyTable table = matrix.makeTable(mtxFile.getName(), true);
+		// CyTable table = matrix.makeTable(mtxFile.getName(), true);
 
 	}
 

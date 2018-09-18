@@ -15,7 +15,7 @@ import org.cytoscape.work.util.ListSingleSelection;
 import edu.ucsf.rbvi.mtxReader.internal.model.MatrixMarket;
 import edu.ucsf.rbvi.mtxReader.internal.model.MTXManager;
 
-public class MTXCreateTableTask extends AbstractTask {
+public class MTXGetValueTask extends AbstractTask {
 	final MTXManager mtxManager;
 
 	@Tunable(description="Matrix to create table from")
@@ -24,7 +24,13 @@ public class MTXCreateTableTask extends AbstractTask {
 	@Tunable(description="Transpose", tooltip="From rows=genes to rows=cells")
 	public boolean transpose = false;
 
-	public MTXCreateTableTask(final MTXManager mtxManager) {
+	@Tunable(description="Gene", tooltip="Gene")
+	public String gene;
+
+	@Tunable(description="Cell", tooltip="Cell")
+	public String cell;
+
+	public MTXGetValueTask(final MTXManager mtxManager) {
 		this.mtxManager = mtxManager;
 		List<String> matrices = new ArrayList<String>(mtxManager.getMatrixNames());
 		if (matrices.size() > 0)
@@ -37,7 +43,11 @@ public class MTXCreateTableTask extends AbstractTask {
 		MatrixMarket matrixMarket = mtxManager.getMatrix(matrix.getSelectedValue());
 		if (matrixMarket == null) return;
 		if (transpose) matrixMarket.setTranspose(transpose);
-		CyTable table = matrixMarket.makeTable(matrix.getSelectedValue(), true);
+		double value = matrixMarket.getValue(gene, cell);
+		if (!Double.isNaN(value))
+			taskMonitor.showMessage(TaskMonitor.Level.INFO, ""+cell+":"+gene+" = "+value);
+		else
+			taskMonitor.showMessage(TaskMonitor.Level.WARN, ""+cell+":"+gene+" doesn't have a value");
 	}
  
 	@ProvidesTitle

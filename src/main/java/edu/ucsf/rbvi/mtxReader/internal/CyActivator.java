@@ -33,6 +33,7 @@ import org.slf4j.LoggerFactory;
 
 import edu.ucsf.rbvi.mtxReader.internal.model.MTXManager;
 import edu.ucsf.rbvi.mtxReader.internal.tasks.MTXCreateTableTaskFactory;
+import edu.ucsf.rbvi.mtxReader.internal.tasks.MTXGetValueTaskFactory;
 import edu.ucsf.rbvi.mtxReader.internal.tasks.MTXReaderTaskFactory;
 
 public class CyActivator extends AbstractCyActivator {
@@ -69,6 +70,14 @@ public class CyActivator extends AbstractCyActivator {
 			mtxTableProps.setProperty(PREFERRED_MENU, "Apps.MTXImporter");
 			mtxTableProps.setProperty(TITLE, "Create table from MTX file");
 			registerService(bc, mtxCreateTableFactory, TaskFactory.class, mtxTableProps);
+		}
+
+		{
+			final MTXGetValueTaskFactory mtxGetValueTaskFactory = new MTXGetValueTaskFactory(serviceRegistrar, manager);
+			Properties mtxGetValueProps = new Properties();
+			mtxGetValueProps.setProperty(PREFERRED_MENU, "Apps.MTXImporter");
+			mtxGetValueProps.setProperty(TITLE, "Get value from matrix");
+			registerService(bc, mtxGetValueTaskFactory, TaskFactory.class, mtxGetValueProps);
 		}
 
 	}
